@@ -6,19 +6,19 @@ todos:
     content: Create the Godot 4.6.2 project, fixed-resolution settings, and folder structure.
     status: pending
   - id: data-resources
-    content: Define Resource classes for item, level curve, item effect, enemy, stage, loot, and stat data.
-    status: pending
-  - id: inventory-items
-    content: Implement progress state, item leveling curves, equip effects, effect hooks, and equip cap rules.
-    status: pending
-  - id: preparation-screen
-    content: Build the Preparation screen with drop listings, item state, tooltip, and equip toggling.
+    content: Define initial Resource classes for player, enemy, stage, loot, and stat data needed by the round loop.
     status: pending
   - id: round-gameplay
     content: Build the Round scene with reticule targeting, enemy spawn/despawn, damage, flicker, and health fill.
     status: pending
   - id: stage-one-stubs
     content: Add Stage 1 player, Enemy A, Boss 1 encounter, and drop table resources with first-pass stats.
+    status: pending
+  - id: inventory-items
+    content: Implement progress state, item definitions, item leveling curves, equip effects, effect hooks, and equip cap rules.
+    status: pending
+  - id: preparation-screen
+    content: Build the Preparation screen with drop listings, item state, tooltip, and equip toggling.
     status: pending
   - id: test-rules
     content: Add focused tests for item leveling, level curves, effect hooks, equipment caps, stat aggregation, enemy damage, rewards, and stage drop listing.
@@ -78,6 +78,8 @@ flowchart TD
     PlayerProgress --> RoundScene
 ```
 
+
+
 Architecture guardrails:
 
 - Use typed `class_name` scripts for custom Resources and important runtime services so exported fields are editor-friendly.
@@ -86,8 +88,6 @@ Architecture guardrails:
 - Keep autoloads narrow. They can own persistent progress, registries, and scene flow, but should not hold references to live gameplay nodes.
 - Keep active run state scene-owned. Pass a run summary from Round to Reward instead of storing round loot in a global singleton.
 - Validate data with pure `validate()`-style methods and gdUnit4 tests rather than relying on scene startup failures.
-
-
 
 ## Data-Driven Items
 
@@ -145,7 +145,7 @@ Level curve behavior:
 Effect behavior:
 
 - Effects should be Resource-based definitions with runtime application handled by item/stat/effect systems.
-- Common effects can be stat modifiers, such as damage, max energy, reticule radius, spawn frequency, rarity weight, quantity, or boss loot chance.
+- Common effects can be stat modifiers, such as damage, max energy, square reticule size, spawn frequency, rarity weight, quantity, or boss loot chance.
 - Unique effects are invoked through a scene-owned effect runner or event bus for gameplay events, such as `on_attack`, `on_hit`, `on_enemy_killed`, `on_boss_killed`, `on_drop_resolved`, or `on_round_tick`.
 - Effect Resources should not directly connect themselves to scene signals because the same Resource asset may be shared by many item instances.
 - The first implementation should include a generic extension point for unique powers, even if Stage 1 starter items only use stat modifiers.
@@ -162,7 +162,7 @@ Stage 1 starter items:
 
 - Tier 1 Common Damage: permanent `+0.1 damage per level`; equipped `+0.2 damage per level`.
 - Tier 1 Common Energy: permanent `+1 max energy per level`; equipped `+2 max energy per level`.
-- Tier 1 Common Size: permanent `+5% damage reticule radius per level`; equipped `+10% damage reticule radius per level`.
+- Tier 1 Common Size: permanent `+5% damage reticule square size per level`; equipped `+10% damage reticule square size per level`.
 - Tier 1 Common Spawn Rate: permanent `+25% enemy spawn frequency per level`; equipped `+50% enemy spawn frequency per level`.
 - Tier 1 Common Boss Loot: permanent `+20% chance for bosses to drop an additional item per level`; equipped an additional `+20% chance per level`.
 - Tier 1 Rare Energy on Kill: permanent `+0.05 energy per kill`; equipped `+0.05 energy per kill per level`.
@@ -262,7 +262,7 @@ Initial player stats:
 - `current_energy`: starts at max energy when a round begins.
 - `base_damage`: `0.5`
 - `rate_of_fire`: `1 attack per second`.
-- `reticule_radius`: `20 pixels`.
+- `reticule_half_size`: `20 pixels`, creating a square damage area centered on the mouse.
 - `energy_drain_per_second`: stage-owned; Stage 1 drains `0.1 energy per second`.
 - `energy_cost_per_damage_dealt`: default `1.0`, meaning the player loses energy equal to damage done after armor and excluding overkill damage.
 - `energy_on_kill`: starts at `0`, then increases from items.
@@ -330,11 +330,11 @@ Example loot entry fields:
 
 Stage 1 stat definitions:
 
-- Player stats: `max_energy` `10`, `base_damage` `0.5`, Stage 1 `energy_drain_per_second` `0.1`, `rate_of_fire` `1 attack per second`, `reticule_radius` `20 pixels`, `energy_cost_per_damage_dealt` `1.0`, `energy_on_kill` `0`, `equip_cap_base` `3`.
+- Player stats: `max_energy` `10`, `base_damage` `0.5`, Stage 1 `energy_drain_per_second` `0.1`, `rate_of_fire` `1 attack per second`, `reticule_half_size` `20 pixels`, `energy_cost_per_damage_dealt` `1.0`, `energy_on_kill` `0`, `equip_cap_base` `3`.
 - Stage 1 roster: one normal enemy entry, Enemy A, and one scheduled boss entry, Boss 1.
 - Enemy A stats: `max_health` `0.5`, `regeneration_rate` `0`, `armor` `0`, `move_speed` `5 pixels per second`, `rotation_speed` `45 degrees per second`, `size` `12 pixels`.
 - Enemy A spawn window: before Boss 1 spawns.
-- Enemy A spawn frequency: `1 second per spawn`.
+- Enemy A spawn interval: `1.0`.
 - Enemy A health variance on spawn: `80%` to `120%`.
 - Enemy A size scaling: multiply base `12 pixel` size by the same spawn variance factor used for health.
 - Enemy A stage health scaling: spawned health gains `+0.02 hp` for each elapsed stage second before spawn, then applies the `80%` to `120%` variance.
@@ -381,9 +381,9 @@ Required behavior:
 - Apply armor as flat damage block, health regeneration over time, move speed, rotation speed, and size from enemy data.
 - Apply the Stage 1 loot drop chance multiplier, rarity item bonuses, and quantity item bonuses in the centralized loot resolver.
 - Accumulate resolved drops into scene-owned run loot state instead of immediately mutating persistent inventory.
-- Place a targeting reticule centered on the mouse.
-- Use a reticule collision area to detect hovered enemies.
-- Apply damage to enemies inside the targeting collision at player `rate_of_fire` and `damage`.
+- Place a square targeting reticule centered on the mouse.
+- Use a square reticule collision area to detect all enemies inside the damage area.
+- Apply damage to every enemy inside the targeting collision at player `rate_of_fire` and `damage`.
 - Show simple placeholder particles/projectiles only if useful for feedback.
 - End round transitions to the Reward screen with the run loot summary.
 
@@ -399,6 +399,8 @@ flowchart LR
     Damage --> HealthBar[Update Health Fill]
     Damage --> DeathCheck[Death Or Continue]
 ```
+
+
 
 ## Reward Screen
 
@@ -478,13 +480,14 @@ Candidate files:
 
 1. Create Godot project settings and folder structure.
 2. Add gdUnit4 and the initial test runner setup.
-3. Add Resource classes for items, item level curves, item effects, enemies, stages, stage enemy entries, stage boss entries, loot tables, and stat modifiers.
-4. Add player progress state and item leveling/equip/effect logic without mutating shared Resource definitions.
-5. Add Preparation screen data display, tooltip, and equip toggling.
-6. Add Round scene, mouse reticule, centralized enemy spawning, hover damage, health display, death signals, loot resolver, and despawn.
-7. Add Reward screen, run loot summary, reward confirmation, and return flow to Preparation.
-8. Add Stage 1 resources with concrete first-pass player, Enemy A, Boss 1, starter item, and drop table values, leaving only undecided balance values marked TBD.
-9. Add focused tests for item leveling, equipment cap, stat aggregation, enemy damage, reward summaries, and stage drop listing.
+3. Add the minimum Resource classes needed for the first playable loop: player stats, enemies, stages, stage enemy entries, stage boss entries, loot tables, and stat modifiers.
+4. Add Stage 1 resources with concrete first-pass player, Enemy A, Boss 1, spawn, health scaling, and placeholder loot values, leaving only undecided balance values marked TBD.
+5. Add Round scene, mouse reticule, centralized enemy spawning, hover damage, health display, death signals, basic run result tracking, and despawn.
+6. Add the scene flow for a complete gameplay loop: Preparation start button, Round completion/failure, Reward summary placeholder, reward confirmation, and return flow to Preparation.
+7. Add item Resource classes, item level curves, item effects, player progress state, and item leveling/equip/effect logic without mutating shared Resource definitions.
+8. Expand the Preparation and Reward screens with drop listings, item state, tooltips, equip toggling, and persistent loot application.
+9. Replace placeholder loot with Stage 1 starter item and drop table values.
+10. Add focused tests for item leveling, equipment cap, stat aggregation, enemy damage, reward summaries, and stage drop listing.
 
 ## Acceptance Criteria
 
@@ -497,7 +500,7 @@ Candidate files:
 - Stage loot is accumulated into a run loot summary during the round.
 - Completing a stage opens a Reward screen showing all collected loot before applying it to persistent progress.
 - Confirming the Reward screen applies loot to `PlayerProgress` and returns to Preparation.
-- The player starts with `10` energy, attacks once per second, has a `20 pixel` reticule radius, Stage 1 drains `0.1` energy per second, and dealing `0.5` base damage reduces energy by non-overkill damage dealt.
+- The player starts with `10` energy, attacks once per second, has a square reticule with `20 pixel` half-size, Stage 1 drains `0.1` energy per second, and dealing `0.5` base damage reduces energy by non-overkill damage dealt.
 - Enemies spawn off-screen from stage-defined spawn frequencies, cross the play area, take hover damage, flicker, show square health fill, and despawn appropriately.
 - Normal enemies and boss encounters apply health, regeneration, armor, movement speed, rotation speed, and size from `EnemyData` resources.
 - Stage 1 contains Enemy A before Boss 1, then Boss 1 spawns every `30 seconds`.
